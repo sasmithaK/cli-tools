@@ -1,0 +1,102 @@
+#!/bin/bash
+
+# System Information Script
+# Displays comprehensive system information
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+print_header() {
+    echo -e "${BLUE}======================================${NC}"
+    echo -e "${BLUE}         SYSTEM INFORMATION${NC}"
+    echo -e "${BLUE}======================================${NC}"
+    echo
+}
+
+print_section() {
+    echo -e "${YELLOW}$1:${NC}"
+    echo "----------------------------------------"
+}
+
+print_header
+
+# System Information
+print_section "System Information"
+echo -e "${GREEN}Hostname:${NC} $(hostname)"
+echo -e "${GREEN}Operating System:${NC} $(uname -s)"
+echo -e "${GREEN}Kernel Version:${NC} $(uname -r)"
+echo -e "${GREEN}Architecture:${NC} $(uname -m)"
+
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    echo -e "${GREEN}Distribution:${NC} $PRETTY_NAME"
+fi
+
+echo -e "${GREEN}Uptime:${NC} $(uptime -p 2>/dev/null || uptime)"
+echo
+
+# CPU Information
+print_section "CPU Information"
+if [ -f /proc/cpuinfo ]; then
+    cpu_model=$(grep "model name" /proc/cpuinfo | head -1 | cut -d: -f2 | sed 's/^ *//')
+    cpu_cores=$(grep "processor" /proc/cpuinfo | wc -l)
+    echo -e "${GREEN}CPU Model:${NC} $cpu_model"
+    echo -e "${GREEN}CPU Cores:${NC} $cpu_cores"
+else
+    echo -e "${GREEN}CPU Info:${NC} $(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo 'Not available')"
+fi
+echo
+
+# Memory Information
+print_section "Memory Information"
+if command -v free >/dev/null 2>&1; then
+    free -h
+elif [ -f /proc/meminfo ]; then
+    total_mem=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+    available_mem=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+    echo -e "${GREEN}Total Memory:${NC} $((total_mem/1024/1024)) GB"
+    echo -e "${GREEN}Available Memory:${NC} $((available_mem/1024/1024)) GB"
+fi
+echo
+
+# Disk Information
+print_section "Disk Usage"
+df -h | grep -E '^/dev|^tmpfs' | head -10
+echo
+
+# Network Information
+print_section "Network Information"
+if command -v ip >/dev/null 2>&1; then
+    echo -e "${GREEN}IP Addresses:${NC}"
+    ip addr show | grep -E 'inet [0-9]' | awk '{print "  " $2}' | head -5
+elif command -v ifconfig >/dev/null 2>&1; then
+    echo -e "${GREEN}IP Addresses:${NC}"
+    ifconfig | grep -E 'inet [0-9]' | awk '{print "  " $2}' | head -5
+fi
+echo
+
+# Process Information
+print_section "Top Processes (by CPU)"
+if command -v ps >/dev/null 2>&1; then
+    ps aux --sort=-%cpu | head -6
+fi
+echo
+
+# Load Average
+print_section "System Load"
+if [ -f /proc/loadavg ]; then
+    echo -e "${GREEN}Load Average:${NC} $(cat /proc/loadavg | cut -d' ' -f1-3)"
+else
+    echo -e "${GREEN}Load Average:${NC} $(uptime | awk -F'load average:' '{print $2}')"
+fi
+
+echo
+echo -e "${BLUE}======================================${NC}"

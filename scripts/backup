@@ -1,0 +1,150 @@
+#!/bin/bash
+
+# Backup Script
+# Creates backups of files and directories with timestamps
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+usage() {
+    echo "Usage: $0 [OPTIONS] SOURCE [DESTINATION]"
+    echo "Create backup of files and directories"
+    echo
+    echo "Arguments:"
+    echo "  SOURCE       File or directory to backup"
+    echo "  DESTINATION  Backup location (default: ./backups/)"
+    echo
+    echo "Options:"
+    echo "  -c, --compress   Compress backup using tar.gz"
+    echo "  -v, --verbose    Show detailed output"
+    echo "  -h, --help       Show this help message"
+    echo
+    echo "Examples:"
+    echo "  $0 ~/Documents"
+    echo "  $0 -c ~/Documents /backup/location"
+    echo "  $0 -v important_file.txt"
+}
+
+COMPRESS=false
+VERBOSE=false
+SOURCE=""
+DESTINATION="./backups"
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -c|--compress)
+            COMPRESS=true
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+        *)
+            if [ -z "$SOURCE" ]; then
+                SOURCE="$1"
+            elif [ -z "$DESTINATION" ] || [ "$DESTINATION" = "./backups" ]; then
+                DESTINATION="$1"
+            else
+                echo "Too many arguments"
+                usage
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
+
+if [ -z "$SOURCE" ]; then
+    echo -e "${RED}Error: SOURCE is required${NC}"
+    usage
+    exit 1
+fi
+
+if [ ! -e "$SOURCE" ]; then
+    echo -e "${RED}Error: Source '$SOURCE' does not exist${NC}"
+    exit 1
+fi
+
+log() {
+    if [ "$VERBOSE" = true ]; then
+        echo -e "${BLUE}[INFO]${NC} $1"
+    fi
+}
+
+# Create timestamp
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+SOURCE_NAME=$(basename "$SOURCE")
+BACKUP_NAME="${SOURCE_NAME}_backup_${TIMESTAMP}"
+
+# Create destination directory
+mkdir -p "$DESTINATION"
+
+log "Creating backup of '$SOURCE'"
+log "Destination: '$DESTINATION'"
+log "Backup name: '$BACKUP_NAME'"
+
+if [ "$COMPRESS" = true ]; then
+    BACKUP_FILE="${DESTINATION}/${BACKUP_NAME}.tar.gz"
+    log "Creating compressed backup: $BACKUP_FILE"
+    
+    if [ -d "$SOURCE" ]; then
+        tar -czf "$BACKUP_FILE" -C "$(dirname "$SOURCE")" "$(basename "$SOURCE")"
+    else
+        tar -czf "$BACKUP_FILE" -C "$(dirname "$SOURCE")" "$(basename "$SOURCE")"
+    fi
+    
+    echo -e "${GREEN}✓${NC} Compressed backup created: $BACKUP_FILE"
+    
+    # Show file size
+    if command -v du >/dev/null 2>&1; then
+        SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
+        echo -e "${BLUE}Backup size: $SIZE${NC}"
+    fi
+else
+    BACKUP_PATH="${DESTINATION}/${BACKUP_NAME}"
+    log "Creating backup copy: $BACKUP_PATH"
+    
+    if [ -d "$SOURCE" ]; then
+        cp -r "$SOURCE" "$BACKUP_PATH"
+    else
+        cp "$SOURCE" "$BACKUP_PATH"
+    fi
+    
+    echo -e "${GREEN}✓${NC} Backup created: $BACKUP_PATH"
+    
+    # Show directory/file size
+    if command -v du >/dev/null 2>&1; then
+        SIZE=$(du -sh "$BACKUP_PATH" | cut -f1)
+        echo -e "${BLUE}Backup size: $SIZE${NC}"
+    fi
+fi
+
+# Calculate checksums for verification
+if command -v sha256sum >/dev/null 2>&1; then
+    log "Calculating checksums for verification"
+    if [ -d "$SOURCE" ]; then
+        find "$SOURCE" -type f -exec sha256sum {} \; > "${DESTINATION}/${BACKUP_NAME}_checksums.txt"
+    else
+        sha256sum "$SOURCE" > "${DESTINATION}/${BACKUP_NAME}_checksums.txt"
+    fi
+    echo -e "${GREEN}✓${NC} Checksums saved to: ${DESTINATION}/${BACKUP_NAME}_checksums.txt"
+fi
+
+echo -e "${BLUE}Backup completed successfully!${NC}"
