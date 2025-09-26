@@ -7,6 +7,9 @@ It’s like `tree`, but smarter — it automatically ignores noise (like `node_m
 
 ---
 
+<img width="912" height="733" alt="cmd" src="https://github.com/user-attachments/assets/13707530-ce0a-45df-85e9-3bd1c786044f" />
+
+
 ### ✨ Features
 - Ignores common clutter directories by default (`node_modules/`, `.next/`, `.git/`).
 - Reads and applies rules from `.gitignore`.
@@ -171,3 +174,4 @@ public
   If not installed, the script will automatically fall back to `find`.
 
 ---
+
