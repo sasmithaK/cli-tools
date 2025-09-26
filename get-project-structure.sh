@@ -5,6 +5,7 @@
 #  - honoring .gitignore entries (dir entries ending with '/')
 #  - allowing extra excludes via -e/--exclude (can repeat)
 #  - optionally saving to an output file (-o/--output)
+#  - optionally selecting specific paths (-p/--path) within the project
 
 set -euo pipefail
 
@@ -12,13 +13,15 @@ PROJECT_ROOT="$(pwd)"
 OUTPUT_FILE=""
 EXTRA_EXCLUDES=()
 SHOW_FILES=true
+SELECT_PATHS=()
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [-o output_file] [-e name_or_pattern] [--compact]
+Usage: $(basename "$0") [-o output_file] [-e name_or_pattern] [-p path] [--compact]
 Options:
   -o, --output FILE      Save output to FILE
   -e, --exclude PATTERN  Extra exclude (can be used multiple times). If ends with '/' treated as directory.
+  -p, --path PATH        Specific directory or file within project to show (repeatable). If omitted, uses project root.
       --compact          Show folders only (no files)
   -h, --help             Show this help
 Example:
@@ -26,6 +29,7 @@ Example:
   get-project-structure -o structure.txt
   get-project-structure -e dist/ -e coverage -o s.txt
   get-project-structure --compact
+  get-project-structure -p src/ -p docs/
 EOF
 }
 
@@ -38,6 +42,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -e|--exclude)
       EXTRA_EXCLUDES+=("$2")
+      shift 2
+      ;;
+    -p|--path)
+      SELECT_PATHS+=("$2")
       shift 2
       ;;
     --compact)
@@ -57,7 +65,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # default directories to ignore
-DIR_IGNORES=( "node_modules" ".next" )
+DIR_IGNORES=( "node_modules" ".next" ".git" )
 FILE_IGNORES=()
 
 GITIGNORE="$PROJECT_ROOT/.gitignore"
@@ -95,6 +103,11 @@ for ex in "${EXTRA_EXCLUDES[@]}"; do
   fi
 done
 
+# normalize SELECT_PATHS (remove trailing slashes)
+for i in "${!SELECT_PATHS[@]}"; do
+  SELECT_PATHS[$i]="${SELECT_PATHS[$i]%/}"
+done
+
 # helper: build tree -I pattern (patterns separated by |)
 build_tree_pattern() {
   local -n _dirs=$1
@@ -120,6 +133,7 @@ build_tree_pattern() {
 }
 
 # helper: build find prune expression for directories
+# note: uses a wildcard prefix so pruning applies anywhere under the searched path
 build_find_prune() {
   local -n _dirs=$1
   if [[ ${#_dirs[@]} -eq 0 ]]; then
@@ -128,8 +142,8 @@ build_find_prune() {
   fi
   local expr=""
   for d in "${_dirs[@]}"; do
-    # prune ./dir and any subpaths
-    expr="$expr -path \"./$d\" -prune -o"
+    # prune */dir and any subpaths (match anywhere beneath the start path)
+    expr="$expr -path \"*/$d\" -prune -o"
   done
   echo "$expr"
 }
@@ -156,6 +170,13 @@ build_grep_regex() {
 # Build patterns
 TREE_PATTERN="$(build_tree_pattern DIR_IGNORES FILE_IGNORES)"
 
+# Determine targets for tree/find: either selected paths or project root (.)
+if [[ ${#SELECT_PATHS[@]} -gt 0 ]]; then
+  TARGETS=("${SELECT_PATHS[@]}")
+else
+  TARGETS=(".")
+fi
+
 # Choose command path
 if command -v tree &>/dev/null; then
   # tree available
@@ -167,6 +188,9 @@ if command -v tree &>/dev/null; then
   if [[ -n "$TREE_PATTERN" ]]; then
     TREE_OPTS+=(-I "$TREE_PATTERN")
   fi
+
+  # Add targets (if targets include ".", tree will show entire tree)
+  TREE_OPTS+=("${TARGETS[@]}")
 
   # produce output
   if [[ -z "$OUTPUT_FILE" ]]; then
@@ -183,27 +207,38 @@ else
   # build grep regex for file patterns
   GREP_REGEX="$(build_grep_regex FILE_IGNORES)"
 
-  # compose find command dynamically (safer to use eval because of -prune segments)
-  if [[ -z "$PRUNE_EXPR" ]]; then
-    FIND_CMD='find . -print'
-  else
-    FIND_CMD="eval find . $PRUNE_EXPR -print"
-  fi
+  # If we have multiple targets, we'll run find on each and concatenate results
+  run_find_for_target() {
+    local target="$1"
+    if [[ -z "$PRUNE_EXPR" ]]; then
+      eval find "$target" -print
+    else
+      # use eval because PRUNE_EXPR contains quoted -path segments
+      eval find "$target" $PRUNE_EXPR -print
+    fi
+  }
 
   # run find and filter file patterns if any
   if [[ -n "$GREP_REGEX" ]]; then
-    # print and then grep -Ev the patterns
     if [[ -z "$OUTPUT_FILE" ]]; then
-      eval find . $PRUNE_EXPR -print | grep -Ev "$GREP_REGEX"
+      for t in "${TARGETS[@]}"; do
+        run_find_for_target "$t"
+      done | grep -Ev "$GREP_REGEX"
     else
-      eval find . $PRUNE_EXPR -print | grep -Ev "$GREP_REGEX" > "$OUTPUT_FILE"
+      for t in "${TARGETS[@]}"; do
+        run_find_for_target "$t"
+      done | grep -Ev "$GREP_REGEX" > "$OUTPUT_FILE"
       echo "✅ Project structure saved to $OUTPUT_FILE"
     fi
   else
     if [[ -z "$OUTPUT_FILE" ]]; then
-      eval find . $PRUNE_EXPR -print
+      for t in "${TARGETS[@]}"; do
+        run_find_for_target "$t"
+      done
     else
-      eval find . $PRUNE_EXPR -print > "$OUTPUT_FILE"
+      for t in "${TARGETS[@]}"; do
+        run_find_for_target "$t"
+      done > "$OUTPUT_FILE"
       echo "✅ Project structure saved to $OUTPUT_FILE"
     fi
   fi
