@@ -1,0 +1,183 @@
+#!/bin/bash
+
+# Find Large Files Script
+# Finds and lists large files on the system
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+usage() {
+    echo "Usage: $0 [OPTIONS] [DIRECTORY]"
+    echo "Find large files in the specified directory (default: current directory)"
+    echo
+    echo "Arguments:"
+    echo "  DIRECTORY    Directory to search (default: current directory)"
+    echo
+    echo "Options:"
+    echo "  -s, --size SIZE  Minimum file size (default: 100M)"
+    echo "                   Examples: 50M, 1G, 500K"
+    echo "  -n, --number N   Number of results to show (default: 20)"
+    echo "  -d, --depth N    Maximum search depth (default: unlimited)"
+    echo "  -t, --type TYPE  File type filter (f=files, d=directories, default: files)"
+    echo "  -v, --verbose    Show detailed output"
+    echo "  -h, --help       Show this help message"
+    echo
+    echo "Examples:"
+    echo "  $0                    # Find files >100M in current directory"
+    echo "  $0 -s 1G /home       # Find files >1GB in /home"
+    echo "  $0 -n 10 -d 2        # Show top 10 files, max depth 2"
+}
+
+SIZE="100M"
+NUMBER=20
+DEPTH=""
+TYPE="f"
+VERBOSE=false
+DIRECTORY="."
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--size)
+            SIZE="$2"
+            shift 2
+            ;;
+        -n|--number)
+            NUMBER="$2"
+            shift 2
+            ;;
+        -d|--depth)
+            DEPTH="-maxdepth $2"
+            shift 2
+            ;;
+        -t|--type)
+            TYPE="$2"
+            shift 2
+            ;;
+        -v|--verbose)
+            VERBOSE=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+        *)
+            DIRECTORY="$1"
+            shift
+            ;;
+    esac
+done
+
+if [ ! -d "$DIRECTORY" ]; then
+    echo -e "${RED}Error: Directory '$DIRECTORY' does not exist${NC}"
+    exit 1
+fi
+
+log() {
+    if [ "$VERBOSE" = true ]; then
+        echo -e "${BLUE}[INFO]${NC} $1"
+    fi
+}
+
+echo -e "${BLUE}======================================${NC}"
+echo -e "${BLUE}         LARGE FILE FINDER${NC}"
+echo -e "${BLUE}======================================${NC}"
+echo
+
+log "Searching directory: $DIRECTORY"
+log "Minimum size: $SIZE"
+log "Maximum results: $NUMBER"
+log "File type: $TYPE"
+
+echo -e "${YELLOW}Searching for large files (minimum size: $SIZE)...${NC}"
+echo
+
+# Create temporary file for results
+TEMP_FILE=$(mktemp)
+trap "rm -f $TEMP_FILE" EXIT
+
+# Convert size format for find command (some versions don't support all formats)
+FIND_SIZE="$SIZE"
+case $SIZE in
+    *K) FIND_SIZE="${SIZE%K}k" ;;
+    *G) FIND_SIZE="${SIZE%G}G" ;;
+    *M) FIND_SIZE="${SIZE%M}M" ;;
+esac
+
+# Find large files
+if find "$DIRECTORY" $DEPTH -type $TYPE -size +$FIND_SIZE -printf "%s %p\n" 2>/dev/null > "$TEMP_FILE"; then
+    if [ -s "$TEMP_FILE" ]; then
+        echo -e "${GREEN}Found large files:${NC}"
+        echo
+        printf "%-12s %s\n" "SIZE" "PATH"
+        echo "----------------------------------------"
+        
+        # Sort by size (largest first) and format output
+        sort -nr "$TEMP_FILE" | head -n "$NUMBER" | while read -r size path; do
+            # Convert size to human readable format
+            if command -v numfmt >/dev/null 2>&1; then
+                human_size=$(numfmt --to=iec-i --suffix=B "$size")
+            else
+                # Fallback manual conversion
+                if [ "$size" -ge 1073741824 ]; then
+                    human_size="$(($size / 1073741824))GB"
+                elif [ "$size" -ge 1048576 ]; then
+                    human_size="$(($size / 1048576))MB"
+                elif [ "$size" -ge 1024 ]; then
+                    human_size="$(($size / 1024))KB"
+                else
+                    human_size="${size}B"
+                fi
+            fi
+            
+            printf "%-12s %s\n" "$human_size" "$path"
+        done
+        
+        echo
+        
+        # Show summary
+        total_files=$(wc -l < "$TEMP_FILE")
+        echo -e "${BLUE}Summary:${NC}"
+        echo "  Total large files found: $total_files"
+        if [ "$total_files" -gt "$NUMBER" ]; then
+            echo "  Showing top $NUMBER results"
+        fi
+        
+        # Calculate total size if verbose
+        if [ "$VERBOSE" = true ]; then
+            total_size=$(awk '{sum += $1} END {print sum}' "$TEMP_FILE")
+            if command -v numfmt >/dev/null 2>&1; then
+                human_total=$(numfmt --to=iec-i --suffix=B "$total_size")
+            else
+                human_total="${total_size}B"
+            fi
+            echo "  Total size of all large files: $human_total"
+        fi
+    else
+        echo -e "${YELLOW}No files larger than $SIZE found.${NC}"
+    fi
+else
+    echo -e "${RED}Error occurred while searching for files.${NC}"
+    exit 1
+fi
+
+# Show disk usage of search directory
+if [ "$VERBOSE" = true ]; then
+    echo
+    echo -e "${BLUE}Disk usage of search directory:${NC}"
+    du -sh "$DIRECTORY" 2>/dev/null || echo "Unable to calculate directory size"
+fi
+
+echo -e "${BLUE}======================================${NC}"
