@@ -1,6 +1,6 @@
 # cli-tools ⌨
 
-## 🗂️ get-project-structure
+## 🗂️ get-project-tree
 
 A handy Bash script to generate a clean **project structure tree**.  
 It’s like `tree`, but smarter — it automatically ignores noise (like `node_modules/`, `.git/`, `.next/`), respects your `.gitignore`, and lets you focus on the directories you care about.
